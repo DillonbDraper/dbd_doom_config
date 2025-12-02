@@ -11,6 +11,17 @@
 (setq user-full-name "Dillon Draper"
       user-mail-address "dillonbdraper@gmail.com")
 
+;; Fix: Reload envrc after startup (timing workaround)
+;; Doom's direnv module should handle this, but restored sessions need a nudge
+(add-hook 'window-setup-hook
+          (lambda ()
+            (run-with-timer
+             0.5 nil
+             (lambda ()
+               (when (and (bound-and-true-p envrc-global-mode)
+                          (fboundp 'envrc-reload-all))
+                 (envrc-reload-all))))))
+
 ;; Doom exposes five (optional) variables for controlling fonts in Doom:
 ;;
 ;; - `doom-font' -- the primary font to use
@@ -46,7 +57,7 @@
 ;; available. You can either set `doom-theme' or manually load a theme with the
 ;; `load-theme' function. This is the default:
 (setq catppuccin-flavor 'mocha) ;; or 'latte, 'macchiato, or 'mocha
-(setq doom-theme 'modus-operandi-tinted)
+(setq doom-theme 'modus-operandi-tinted)  ; TEMP DISABLED FOR DEBUG
 
 ;; This determines the style of line numbers in effect. If set to `nil', line
 ;; numbers are disabled. For relative line numbers, set this to `relative'.
@@ -89,7 +100,7 @@
 ;; You can also try 'gd' (or 'C-c c d') to jump to their definition and see how
 ;; they are implemented.
 
-(set-face-foreground 'line-number "F0F0F0")
+(set-face-foreground 'line-number "#F0F0F0")
 (set-face-foreground 'line-number-current-line "#6AE505")
 (after! treemacs
   (setq treemacs-follow-mode t))
@@ -114,9 +125,41 @@
 
   (setenv "GEMINI_API_KEY" gemini-key)
   :custom
-                                        ; See the Configuration section below
+  ;; See the Configuration section below
   (aidermacs-default-chat-mode 'architect)
-  (aidermacs-default-model "gemini-2.5-pro"))
+  (aidermacs-default-model "gemini/gemini-3-pro-preview")
+  (aidermacs-extra-args '("--no-gitignore")))
+
+(defun my/aider-add-current-buffer-read-only ()
+  "Adds the current buffer to the running Aider session as read-only.
+   Searches for a buffer starting with *aidermacs."
+  (interactive)
+  (let ((file-path (buffer-file-name))
+        (aider-buf (seq-find (lambda (b) (string-prefix-p "*aidermacs" (buffer-name b)))
+                             (buffer-list))))
+    (unless file-path
+      (error "Buffer is not visiting a file"))
+    (if aider-buf
+        (with-current-buffer aider-buf
+          (process-send-string (get-buffer-process aider-buf)
+                               (format "/read %s\n" file-path))
+          (message "Added %s to Aider as read-only context." file-path))
+      (error "No active Aider session found (looked for buffer starting with *aidermacs)."))))
+
+(defun my/goto-paragraph-start ()
+  "Move the cursor to the first character of the current paragraph."
+  (interactive)
+  (backward-paragraph)
+  (skip-chars-forward " \t\n"))
+
+(defun my/goto-paragraph-end ()
+  "Move the cursor to the last character of the current paragraph."
+  (interactive)
+  (forward-paragraph)
+  (skip-chars-backward " \t\n"))
+
+(map! :nv "gk" #'my/goto-paragraph-start
+      :nv "gj" #'my/goto-paragraph-end)
 
 (use-package! gptel
   :config
@@ -135,10 +178,11 @@
 
     ;; Set the default backend and model
     (setq gptel-backend gptel-gemini
-          gptel-model "gemini-pro-latest")))
+          gptel-model 'gemini-pro-latest)))
 
 (after! lsp-mode
   (add-to-list 'lsp-language-id-configuration '(".*\\.heex$" . "elixir")))
+(setq display-time-format '("%I:%M %p"))
 
 ;; --- TSX mode association ---
 (add-to-list 'auto-mode-alist '("\\.tsx\\'" . tsx-ts-mode))
@@ -219,14 +263,28 @@
         (when background
           (message "Started %s in background" buf-name))))))
 
-;;; 1. Function to start Elixir Server
+;;; 1. Start Coop Database
+(defun my/dbstart ()
+  "Start PostgreSQL server if it is not already running."
+  (interactive)
+  (let* ((db-dir (expand-file-name "~/Databases/co-op/"))
+         (pid-file (concat db-dir "postmaster.pid")))
+    (if (not (file-exists-p pid-file))
+        (progn
+          (message "Starting PostgreSQL...")
+          (start-process "pg_ctl" nil "pg_ctl" "start"
+                         "-D" db-dir
+                         "-l" (concat db-dir "logfile")))
+      (message "PostgreSQL is already running."))))
+
+;;; 2. Function to start Elixir Server
 (defun my/start-server (&optional background)
   "Starts the Elixir/Phoenix server in the project root."
   (interactive)
   (let ((root (projectile-project-root)))
     (my/run-in-vterm "elixir-server" root "iex -S mix phx.server" background)))
 
-;;; 2. Function to start React Client
+;;; 3. Function to start React Client
 (defun my/start-client (&optional background)
   "Starts the React client in the /client subdirectory."
   (interactive)
@@ -237,10 +295,11 @@
                      "npm run local"
                      background)))
 
-;;; 3. Function to start BOTH in background
+;;; 4. Function to start full app in background
 (defun my/start-full-stack ()
   "Starts both Elixir and React servers in the background without changing window layout."
   (interactive)
+  (my/dbstart)
   (my/start-server t)
   (my/start-client t)
   (message "Full stack starting in background..."))
@@ -250,9 +309,10 @@
 
 (map! :leader
       (:prefix ("d" . "Dillon")
+       :desc "Start Coop Database" "d" #'my/dbstart
        :desc "Start Coop Server" "s" #'my/start-server
        :desc "Start Coop Client"   "c" #'my/start-client
-       :desc "Start Fullstack" "b" #'my/start-full-stack))
+       :desc "Start Fullstack" "f" #'my/start-full-stack))
 
 
 (after! lsp-mode
@@ -262,3 +322,244 @@
     :major-modes '(elixir-mode)
     :priority 10
     :server-id 'expert-elixir)))
+;;; Org Mode Configuration
+
+;; 1. General Org Settings (Run after 'org' loads)
+(after! org
+  ;; Enable Org Habit module
+  (add-to-list 'org-modules 'org-habit)
+
+  (setq org-read-date-force-compatible-dates nil)
+  (setq org-habit-show-all-today t
+        org-habit-graph-column 1)
+
+  ;; Capture Templates
+  (setq org-capture-templates
+        '(("t" "Todo" entry
+           (file+headline "~/org/inbox.org" "Inbox")
+           "* TODO %^{Task}\n:PROPERTIES:\n:CREATED: %U\n:CAPTURED: %a\n:END:\n%?")
+
+          ("e" "Event" entry
+           (file+headline "~/org/calendar.org" "Events")
+           "* %^{Event}\n%^{SCHEDULED}T\n:PROPERTIES:\n:CREATED: %U\n:CAPTURED: %a\n:CONTACT: %(org-capture-ref-link \"~/org/contacts.org\")\n:END:\n%?")
+
+          ("d" "Deadline" entry
+           (file+headline "~/org/calendar.org" "Deadlines")
+           "* TODO %^{Task}\nDEADLINE: %^{Deadline}T\n:PROPERTIES:\n:CREATED: %U\n:CAPTURED: %a\n:END:\n%?")
+
+          ("p" "Project" entry
+           (file+headline "~/org/projects.org" "Projects")
+           "* PROJ %^{Project name}\n:PROPERTIES:\n:CREATED: %U\n:CAPTURED: %a\n:END:\n** TODO %?")
+
+          ("i" "Idea" entry
+           (file+headline "~/org/ideas.org" "Ideas")
+           "** IDEA %^{Idea}\n:PROPERTIES:\n:CREATED: %U\n:CAPTURED: %a\n:END:\n%?")
+
+          ("b" "Bookmark" entry
+           (file+headline "~/org/bookmarks.org" "Inbox")
+           "** [[%^{URL}][%^{Title}]]\n:PROPERTIES:\n:CREATED: %U\n:TAGS: %(org-capture-bookmark-tags)\n:END:\n\n"
+           :empty-lines 0)
+
+          ("c" "Contact" entry
+           (file+headline "~/org/contacts.org" "Inbox")
+           "* %^{Name}\n:PROPERTIES:\n:CREATED: %U\n:CAPTURED: %a\n:EMAIL: %^{Email}\n:PHONE: %^{Phone}\n:BIRTHDAY: %^{Birthday +1y}u\n:LOCATION: %^{Address}\n:LAST_CONTACTED: %U\n:END:\n\\ *** Communications\n\\ *** Notes\n%?")
+
+          ("n" "Note" entry
+           (file+headline "~/org/notes.org" "Inbox")
+           "* [%<%Y-%m-%d %a>] %^{Title}\n:PROPERTIES:\n:CREATED: %U\n:CAPTURED: %a\n:END:\n%?"
+           :prepend t)))
+
+  ;; Babel Languages
+  (org-babel-do-load-languages
+   'org-babel-load-languages
+   '((elixir . t) (python . t) (javascript . t) (sql . t)))
+
+  (setq org-src-fontify-natively t
+        org-src-preserve-indentation t
+        org-src-tab-acts-natively t
+        org-src-window-setup 'current-window))
+
+;; Auto-tangle configuration
+(use-package! org-auto-tangle
+  :hook (org-mode . org-auto-tangle-mode)
+  :config
+  (setq org-auto-tangle-default t))
+
+;; 2. Agenda Settings (Run after 'org-agenda' loads)
+(after! org-agenda
+  (setq org-agenda-remove-tags t
+        org-agenda-block-separator 32
+        org-agenda-include-diary nil)
+
+  ;; Agenda Visual Tweaks Hook
+  (add-hook 'org-agenda-mode-hook
+            (lambda ()
+              (visual-line-mode -1)
+              (setq truncate-lines 1)))
+
+  ;; Custom Commands (The Dashboard)
+  (setq org-agenda-custom-commands
+        '(("d" "Dashboard"
+           ((tags "PRIORITY=\"A\""
+                  ((org-agenda-skip-function '(org-agenda-skip-entry-if 'todo 'done))
+                   (org-agenda-overriding-header "\n HIGHEST PRIORITY")
+                   (org-agenda-prefix-format "   %i %?-2 t%s")))
+            (agenda ""
+                    ((org-agenda-start-day "+0d")
+                     (org-agenda-span 1)
+                     (org-agenda-time)
+                     (org-agenda-remove-tags t)
+                     (org-agenda-todo-keyword-format "")
+                     (org-agenda-scheduled-leaders '("" ""))
+                     (org-agenda-current-time-string "ᐊ┈┈┈┈┈┈┈┈┈ NOW")
+                     (org-agenda-overriding-header "\n TODAY'S SCHEDULE")
+                     (org-agenda-prefix-format "   %i %?-2 t%s")))
+            (tags-todo "-STYLE=\"habit\""
+                       ((org-agenda-overriding-header "\n ALL TODO")
+                        (org-agenda-sorting-strategy '(priority-down))
+                        (org-agenda-remove-tags t)
+                        (org-agenda-prefix-format "   %i %?-2 t%s"))))))))
+
+;; 3. Helper functions (These can stay top-level)
+
+(defun org-capture-bookmark-tags ()
+  "Get tags from existing bookmarks and prompt for tags with completion."
+  (save-window-excursion
+    (let ((tags-list '()))
+      ;; Collect existing tags
+      (with-current-buffer (find-file-noselect "~/org/bookmarks.org")
+        (save-excursion
+          (goto-char (point-min))
+          (while (re-search-forward "^:TAGS:\\s-*\\(.+\\)$" nil t)
+            (let ((tag-string (match-string 1)))
+              (dolist (tag (split-string tag-string "[,;]" t "[[:space:]]"))
+                (push (string-trim tag) tags-list))))))
+      ;; Remove duplicates and sort
+      (setq tags-list (sort (delete-dups tags-list) 'string<))
+      ;; Prompt user with completion
+      (let ((selected-tags (completing-read-multiple "Tags (comma-separated): " tags-list)))
+        ;; Return as a comma-separated string
+        (mapconcat 'identity selected-tags ", ")))))
+
+;; Helper function to select and link a contact
+(defun org-capture-ref-link (file)
+  "Create a link to a contact in contacts.org"
+  (let* ((headlines (org-map-entries
+                     (lambda ()
+                       (cons (org-get-heading t t t t)
+                             (org-id-get-create)))
+                     t
+                     (list file)))
+         (contact (completing-read "Contact: "
+                                   (mapcar #'car headlines)))
+         (id (cdr (assoc contact headlines))))
+    (format "[[id:%s][%s]]" id contact)))
+
+;;; --- Org Roam Configuration ---
+
+(use-package! org-roam
+  :ensure t
+  :init
+  (setq org-roam-v2-ack t)
+  :custom
+  (org-roam-directory (file-truename "~/org/roam"))
+  :config
+  (org-roam-db-autosync-mode)
+
+  ;; Create the directory if it doesn't exist
+  (unless (file-exists-p org-roam-directory)
+    (make-directory org-roam-directory t))
+
+  ;; -- Helper: Force Create Node if Missing --
+  (defun my/org-roam-force-create-node (title &optional tag)
+    "Creates a new Org-roam node with TITLE immediately and returns its ID.
+     If TAG is provided, adds it to #+filetags."
+    (let* ((slug (downcase (replace-regexp-in-string "[^a-zA-Z0-9]+" "-" title)))
+           (filename (expand-file-name (format "%s-%s.org"
+                                               (format-time-string "%Y%m%d%H%M%S")
+                                               slug)
+                                       org-roam-directory))
+           (id (org-id-new))
+           (tag-str (if tag (format "#+filetags: :%s:\n" tag) "")))
+      ;; Create the file
+      (with-temp-file filename
+        (insert (format ":PROPERTIES:\n:ID:       %s\n:END:\n#+title: %s\n%s" id title tag-str)))
+      ;; Update DB
+      (org-roam-db-update-file filename)
+      id))
+
+  ;; -- Helper: Read Multiple Links by Tag --
+  (defun my/org-roam-read-nodes-by-tag (tag prompt)
+    "Loops, prompting for nodes filtered by TAG. Creates them with TAG if missing.
+     Returns a comma-separated string of links."
+    (let ((links '())
+          (node nil)
+          (continue t)
+          (filter-fn (lambda (node) (member tag (org-roam-node-tags node)))))
+      (while continue
+        (setq node (org-roam-node-read nil filter-fn nil nil (concat prompt " (RET to finish): ")))
+        (let ((title (org-roam-node-title node)))
+          (if (or (not title) (string-empty-p title))
+              (setq continue nil)
+            (let ((id (org-roam-node-id node)))
+              (unless id (setq id (my/org-roam-force-create-node title tag)))
+              (push (format "[[id:%s][%s]]" id title) links)))))
+      (mapconcat 'identity (nreverse links) ", ")))
+
+  ;; -- Helper: Read Orientation --
+  (defun my/org-roam-read-orientation ()
+    "Prompts for one or more orientations and returns them as a formatted tag string."
+    (let ((choices (completing-read-multiple "Orientation (comma-separated): "
+                                             '("Top" "Bottom" "Superior" "Inferior"))))
+      (setq choices (delete "" choices))
+      (if choices
+          (concat ":" (mapconcat #'downcase choices ":"))
+        "")))
+
+  ;; -- Capture Templates --
+  (setq org-roam-capture-templates
+        `(("d" "default" plain "%?"
+           :target (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
+                              "#+title: ${title}\n")
+           :unnarrowed t)
+
+          ("p" "Position" plain
+           ,(concat
+             "*Description:* %^{Description}\n"
+             "*Videos:*\n- \n"
+             "*Notes:*\n%?")
+           :target (file+head "positions/%<%Y%m%d%H%M%S>-${slug}.org"
+                              "#+title: ${title}\n#+filetags: :position:\n")
+           :unnarrowed t)
+
+          ("g" "Grip" plain
+           ,(concat
+             "*Description:* %^{Description}\n"
+             "*Videos:*\n- \n"
+             "*Notes:*\n%?")
+           :target (file+head "grips/%<%Y%m%d%H%M%S>-${slug}.org"
+                              "#+title: ${title}\n#+filetags: :grip:\n")
+           :unnarrowed t)
+
+          ("t" "Technique" plain
+           ,(concat
+             "*Positions:* %(my/org-roam-read-nodes-by-tag \"position\" \"Link Position\")\n"
+             "*Grips:* %(my/org-roam-read-nodes-by-tag \"grip\" \"Link Grip\")\n"
+             "*Description:* %^{Description}\n"
+             "*Teaching Points:*\n- \n"
+             "*Videos:*\n- \n"
+             "*Notes:*\n%?\n"
+             "*Mastery:* %^{Mastery (1-10)|1|2|3|4|5|6|7|8|9|10}\n"
+             "*Related Techniques:* \n")
+           :target (file+head "techniques/%<%Y%m%d%H%M%S>-${slug}.org"
+                              "#+title: ${title}\n#+filetags: :technique%(my/org-roam-read-orientation):\n")
+           :unnarrowed t)
+
+          ("c" "Concept" plain
+           ,(concat
+             "*Description:* %^{Description}\n"
+             "*Videos:*\n- \n"
+             "*Connections:*\n%?")
+           :target (file+head "concepts/%<%Y%m%d%H%M%S>-${slug}.org"
+                              "#+title: ${title}\n#+filetags: :concept:\n")
+           :unnarrowed t))))

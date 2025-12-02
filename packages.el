@@ -55,3 +55,4 @@
 (package! aidermacs :recipe (:host github :repo "MatthewZMD/aidermacs"))
 (package! catppuccin-theme)
 (package! modus-themes)
+(package! org-auto-tangle)
