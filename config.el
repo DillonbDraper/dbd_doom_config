@@ -314,6 +314,22 @@
        :desc "Start Coop Client"   "c" #'my/start-client
        :desc "Start Fullstack" "f" #'my/start-full-stack))
 
+(defun my/switch-to-elixir-server ()
+  "Switch to the Elixir server vterm buffer."
+  (interactive)
+  (switch-to-buffer "*elixir-server*"))
+
+(defun my/switch-to-react-client ()
+  "Switch to the React client server vterm buffer."
+  (interactive)
+  (switch-to-buffer "*react-client*"))
+
+(map! :leader
+      (:prefix ("j" . "jump to")
+       :desc "Jmp to React Client" "c" #'my/switch-to-react-client
+       :desc "Jump To Elixir Server" "s" #'my/switch-to-elixir-server))
+
+
 
 (after! lsp-mode
   (lsp-register-client
