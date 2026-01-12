@@ -57,7 +57,7 @@
 ;; available. You can either set `doom-theme' or manually load a theme with the
 ;; `load-theme' function. This is the default:
 (setq catppuccin-flavor 'mocha) ;; or 'latte, 'macchiato, or 'mocha
-(setq doom-theme 'modus-operandi-tinted)  ; TEMP DISABLED FOR DEBUG
+(setq doom-theme 'doom-dracula)
 
 ;; This determines the style of line numbers in effect. If set to `nil', line
 ;; numbers are disabled. For relative line numbers, set this to `relative'.
@@ -100,8 +100,8 @@
 ;; You can also try 'gd' (or 'C-c c d') to jump to their definition and see how
 ;; they are implemented.
 
-(set-face-foreground 'line-number "#F0F0F0")
-(set-face-foreground 'line-number-current-line "#6AE505")
+;; (set-face-foreground 'line-number "#F0F0F0")
+;; (set-face-foreground 'line-number-current-line "#6AE505")
 (after! treemacs
   (setq treemacs-follow-mode t))
 
@@ -130,22 +130,6 @@
   (aidermacs-default-model "gemini/gemini-3-pro-preview")
   (aidermacs-extra-args '("--no-gitignore")))
 
-(defun my/aider-add-current-buffer-read-only ()
-  "Adds the current buffer to the running Aider session as read-only.
-   Searches for a buffer starting with *aidermacs."
-  (interactive)
-  (let ((file-path (buffer-file-name))
-        (aider-buf (seq-find (lambda (b) (string-prefix-p "*aidermacs" (buffer-name b)))
-                             (buffer-list))))
-    (unless file-path
-      (error "Buffer is not visiting a file"))
-    (if aider-buf
-        (with-current-buffer aider-buf
-          (process-send-string (get-buffer-process aider-buf)
-                               (format "/read %s\n" file-path))
-          (message "Added %s to Aider as read-only context." file-path))
-      (error "No active Aider session found (looked for buffer starting with *aidermacs)."))))
-
 (defun my/goto-paragraph-start ()
   "Move the cursor to the first character of the current paragraph."
   (interactive)
@@ -160,6 +144,8 @@
 
 (map! :nv "gk" #'my/goto-paragraph-start
       :nv "gj" #'my/goto-paragraph-end)
+
+(setq auth-sources '("~/.authinfo"))
 
 (use-package! gptel
   :config
@@ -187,6 +173,14 @@
 ;; --- TSX mode association ---
 (add-to-list 'auto-mode-alist '("\\.tsx\\'" . tsx-ts-mode))
 (add-to-list 'auto-mode-alist '("\\.jsx\\'" . tsx-ts-mode))
+
+(after! aphelia
+  ;; 1. Ensure Aphelia uses 'eslint' for TS/TSX/JS modes.
+  ;;    (Doom defaults might use prettier; this forces eslint if that's what you prefer)
+  (setf (alist-get 'tsx-ts-mode aphelia-mode-alist) '(eslint))
+  (setf (alist-get 'typescript-ts-mode aphelia-mode-alist) '(eslint))
+  (setf (alist-get 'js-ts-mode aphelia-mode-alist) '(eslint))
+  (setf (alist-get 'js-mode aphelia-mode-alist) '(eslint)))
 
 
 ;; --- LSP Configuration and Hooks ---
@@ -332,12 +326,14 @@
 
 
 (after! lsp-mode
-  (lsp-register-client
-   (make-lsp-client
-    :new-connection (lsp-stdio-connection '("/home/dillon/expert/apps/expert/burrito_out/expert_linux_amd64" "--stdio"))
-    :major-modes '(elixir-mode)
-    :priority 10
-    :server-id 'expert-elixir)))
+  (let ((expert-ls-path (expand-file-name "~/expert/apps/expert/burrito_out/expert_linux_amd64")))
+    (when (file-executable-p expert-ls-path)
+      (lsp-register-client
+       (make-lsp-client
+        :new-connection (lsp-stdio-connection (list expert-ls-path "--stdio"))
+        :major-modes '(elixir-mode)
+        :priority 10
+        :server-id 'expert-elixir)))))
 ;;; Org Mode Configuration
 
 ;; 1. General Org Settings (Run after 'org' loads)

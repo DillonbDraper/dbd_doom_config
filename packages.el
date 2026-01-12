@@ -56,3 +56,6 @@
 (package! catppuccin-theme)
 (package! modus-themes)
 (package! org-auto-tangle)
+(package! shell-maker)
+(package! acp)
+(package! agent-shell)
